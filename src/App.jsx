@@ -412,7 +412,42 @@ export default function App(){
   const getAi=async()=>{
     if(!curHex||aiLoading)return;
     setAiLoading(true);setAiText("");setAiError("");
-    const henInfo=henHex?`\n\n【変卦】第${henHex.num}卦 ${henHex.name}（${henHex.kanji}）\n変卦の意味：${henHex.meaning}`:"";
+
+    // 変爻情報を整形
+    const henkoInfo=castLines
+      ? castLines.map((v,i)=>{
+          if(v===6) return `第${i+1}爻（老陰→陽に変じる）`;
+          if(v===9) return `第${i+1}爻（老陽→陰に変じる）`;
+          return null;
+        }).filter(Boolean).join("、")
+      : "なし";
+
+    const shikua=henHex
+      ? `第${henHex.num}卦 ${henHex.name}（${henHex.kanji}）／${henHex.keyword}／${henHex.meaning}`
+      : "なし（変爻なし）";
+
+    const prompt=`あなたは高度な知識を持つ「易経の指導者」です。
+ユーザーが相談内容を入力し、易占いによって本卦と変爻が導き出されました。
+以下のステップで、現代の生活に役立つ具体的な助言を生成してください。
+
+### 制約事項
+- 易経の古典的解釈をベースにすること。
+- ユーザーに寄り添い、具体的な行動指針を提示すること。
+- 専門用語（老陽・老陰など）は必要に応じて噛み砕いて説明すること。
+
+### 出力フォーマット
+1. 【直感的な一言】（今の状況を一言で表す）
+2. 【現状の卦の解説】（本卦が示す意味）
+3. 【変爻からのメッセージ】（これが今回の核心となるアドバイス）
+4. 【未来への兆し】（之卦が示す到達点）
+5. 【今日からできるアクション】（具体的な行動リスト3〜5項目）
+
+### 入力データ
+- 相談内容: ${question||"（特になし。今の自分への問い）"}
+- 本卦: 第${curHex.num}卦 ${curHex.name}（${curHex.kanji}）／キーワード：${curHex.keyword}／卦辞：「${curHex.guaci}」／意味：${curHex.meaning}
+- 変爻位置: ${henkoInfo}
+- 之卦（変卦）: ${shikua}`;
+
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
@@ -423,31 +458,8 @@ export default function App(){
         },
         body:JSON.stringify({
           model:"claude-haiku-4-5-20251001",
-          max_tokens:900,
-          messages:[{
-            role:"user",
-            content:`あなたは易経の深い知識を持つ賢者です。以下の卦について、初心者でも読み解けるよう丁寧に、かつ詩的に日本語で解釈してください。
-
-【問い】「${question||"（問いなし）"}」
-【本卦】第${curHex.num}卦 ${curHex.name}（${curHex.kanji}）
-キーワード：${curHex.keyword}
-卦辞：「${curHex.guaci}」
-意味：${curHex.meaning}
-思想背景：${curHex.history||""}${henInfo}
-
-以下の構成で500字程度で書いてください：
-
-①【この卦が示す状況】
-今あなたが置かれている状況を、卦の象（かたち）と自然のイメージで描写する
-
-②【卦辞の読み解き】
-古典の言葉を現代の言葉で噛み砕いて説明する${henHex?"\n\n③【変卦が示す行方】\n本卦から変卦へ変化することで、状況がどう展開するかを読み解く":""}
-
-${henHex?"④":"③"}【あなたへの示唆】
-問いに対して、今何をすべきか・何に気をつけるべきかを具体的に
-
-【箴言】最後に一言の短い言葉で締める`
-          }],
+          max_tokens:1200,
+          messages:[{role:"user",content:prompt}],
         }),
       });
       const d=await res.json();
@@ -456,11 +468,14 @@ ${henHex?"④":"③"}【あなたへの示唆】
       if(!t)throw new Error("content[0].textが空: "+JSON.stringify(d).slice(0,200));
       setAiText(t);
     }catch(e){
-      // フォールバック
-      const honInfo=`【${curHex.name}】第${curHex.num}卦\n\n①【この卦が示す状況】\n${curHex.keyword}の象。${curHex.meaning}\n\n②【卦辞の読み解き】\n「${curHex.guaci}」——${curHex.history||"天地の理は変化の中にある。"}`;
-      const henFallback=henHex?`\n\n③【変卦が示す行方】\n${curHex.name}から${henHex.name}へと変化する。${henHex.meaning} ${henHex.advice}`:"";
-      const idx=henHex?4:3;
-      const fallback=honInfo+henFallback+`\n\n${henHex?"④":"③"}【あなたへの示唆】\n${curHex.advice}\n\n【箴言】${curHex.advice.split("。")[0]}。`;
+      // フォールバック（AI接続失敗時のローカル解釈）
+      const actionList=`・${curHex.advice.split("。")[0]}\n・焦らず現状を観察する\n・信頼できる人に相談してみる`;
+      const fallback=
+        `1. 【直感的な一言】\n${curHex.keyword.split("・")[0]}の時。\n\n` +
+        `2. 【現状の卦の解説】\n第${curHex.num}卦「${curHex.name}」——${curHex.meaning} ${curHex.history||""}\n\n` +
+        `3. 【変爻からのメッセージ】\n${henkoInfo!=="なし"?`変爻（${henkoInfo}）が示すのは、今まさに変化の岐路にいるということ。この爻の動きに注目せよ。`:"今回は変爻なし。現状の卦がそのまま状況を示しています。"}\n\n` +
+        `4. 【未来への兆し】\n${henHex?`之卦「${henHex.name}」へ。${henHex.meaning}`:"変爻がないため、本卦の状況が持続します。"} ${henHex?.advice||""}\n\n` +
+        `5. 【今日からできるアクション】\n${actionList}`;
       setAiText(fallback);
       setAiError("（内蔵解釈を表示中）");
     }
@@ -624,19 +639,58 @@ ${henHex?"④":"③"}【あなたへの示唆】
 
               {curHex.yaoci&&curHex.yaoci.length>0&&(
                 <div className="fu3" style={{marginBottom:"10px"}}>
-                  <div className="lbl">◈ 爻 辞</div>
-                  {curHex.yaoci.map((y,i)=>(
-                    <div key={i} className="yr" onClick={()=>setExpandYao(expandYao===i?null:i)}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px"}}>
-                        <span style={{fontSize:"12px",color:"#c8a97e"}}>{y.line}</span>
-                        <span style={{fontSize:"10px",color:"#5a6898"}}>{expandYao===i?"▲":"▼"}</span>
-                      </div>
-                      {expandYao===i&&<div style={{padding:"0 12px 10px",borderTop:"1px solid rgba(200,169,126,.06)"}}>
-                        <p style={{fontSize:"13px",fontStyle:"italic",color:"#d4c8a0",marginBottom:"6px",lineHeight:"1.8"}}>「{y.text}」</p>
-                        <p style={{fontSize:"12px",color:"#8a9098",lineHeight:"1.9"}}>{y.comment}</p>
-                      </div>}
+                  <div className="lbl">◈ 爻 辞（こうじ）</div>
+                  {/* 変爻がある場合は先に変爻を強調表示 */}
+                  {castLines&&castLines.some(v=>v===6||v===9)&&(
+                    <div style={{padding:"10px 13px",background:"rgba(200,160,60,.06)",border:"1px solid rgba(200,160,60,.2)",borderRadius:"4px",marginBottom:"10px"}}>
+                      <div style={{fontSize:"10px",color:"#c8a060",letterSpacing:".15em",marginBottom:"8px"}}>◉ 変爻（今回の卦で特に注目すべき爻）</div>
+                      {[...castLines].reverse().map((v,i)=>{
+                        const yaoIdx=6-1-i; // 下から数えた爻インデックス（0=初爻）
+                        const yaoNum=yaoIdx+1;
+                        if(v!==6&&v!==9)return null;
+                        const y=curHex.yaoci[yaoIdx];
+                        if(!y)return null;
+                        return(
+                          <div key={i} style={{marginBottom:"8px",padding:"10px 12px",background:"rgba(200,160,60,.05)",border:"1px solid rgba(200,160,60,.15)",borderRadius:"3px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"5px"}}>
+                              <span style={{fontSize:"12px",color:"#d4a840",fontWeight:600}}>{y.line}</span>
+                              <span style={{fontSize:"10px",padding:"1px 6px",background:v===9?"rgba(200,120,40,.15)":"rgba(80,120,220,.15)",border:v===9?"1px solid rgba(200,120,40,.3)":"1px solid rgba(80,120,220,.3)",color:v===9?"#d4a060":"#8ab0e8",borderRadius:"2px"}}>
+                                {v===9?"老陽 → 陰に変じる":"老陰 → 陽に変じる"}
+                              </span>
+                            </div>
+                            <p style={{fontSize:"13px",fontStyle:"italic",color:"#e4d890",marginBottom:"5px",lineHeight:"1.8"}}>「{y.text}」</p>
+                            <p style={{fontSize:"12px",color:"#b0a070",lineHeight:"1.9"}}>{y.comment}</p>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
+                  )}
+                  {/* 全爻辞一覧 */}
+                  <div style={{fontSize:"10px",color:"#4a5568",letterSpacing:".1em",marginBottom:"6px"}}>全爻辞（タップで展開）</div>
+                  {curHex.yaoci.map((y,i)=>{
+                    // 変爻かどうか判定（castLinesは下から順に並ぶ）
+                    const rawVal=castLines?castLines[i]:null;
+                    const isHen=rawVal===6||rawVal===9;
+                    return(
+                      <div key={i} className="yr" onClick={()=>setExpandYao(expandYao===i?null:i)}
+                        style={{borderColor:isHen?"rgba(200,160,60,.35)":"rgba(200,169,126,.08)"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+                            <span style={{fontSize:"12px",color:isHen?"#d4a840":"#c8a97e",fontWeight:isHen?"600":"400"}}>{y.line}</span>
+                            {isHen&&<span style={{fontSize:"9px",padding:"1px 5px",background:"rgba(200,160,60,.12)",color:"#c8a040",borderRadius:"2px",border:"1px solid rgba(200,160,60,.25)"}}>変爻</span>}
+                          </div>
+                          <span style={{fontSize:"10px",color:"#5a6898"}}>{expandYao===i?"▲":"▼"}</span>
+                        </div>
+                        {expandYao===i&&<div style={{padding:"0 12px 10px",borderTop:`1px solid ${isHen?"rgba(200,160,60,.15)":"rgba(200,169,126,.06)"}`}}>
+                          <p style={{fontSize:"13px",fontStyle:"italic",color:isHen?"#e4d890":"#d4c8a0",marginBottom:"6px",lineHeight:"1.8"}}>「{y.text}」</p>
+                          <p style={{fontSize:"12px",color:"#8a9098",lineHeight:"1.9"}}>{y.comment}</p>
+                          {isHen&&<p style={{fontSize:"11px",color:"#a08040",marginTop:"6px",padding:"5px 8px",background:"rgba(200,160,60,.06)",borderRadius:"3px",borderLeft:"2px solid rgba(200,160,60,.3)"}}>
+                            ※この爻が変じて変卦へと展開します
+                          </p>}
+                        </div>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
